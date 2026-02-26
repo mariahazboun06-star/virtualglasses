@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>متجر النظارات الذكي - التجربة الحية</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            text-align: center; 
+            background-color: #f4f7f6; 
+            color: #333; 
+            margin: 0; 
+            padding: 20px; 
+        }
+        .container { 
+            max-width: 800px; 
+            margin: auto; 
+            background: white; 
+            padding: 30px; 
+            border-radius: 15px; 
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1); 
+        }
+        h1 { color: #2c3e50; }
+        button { 
+            background-color: #3498db; 
+            color: white; 
+            padding: 15px 30px; 
+            font-size: 18px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            transition: 0.3s;
+            margin-bottom: 20px;
+        }
+        button:hover { background-color: #2980b9; }
+        #camera-container { 
+            position: relative; 
+            display: none; 
+            justify-content: center; 
+            margin-top: 20px;
+        }
+        video { 
+            border-radius: 10px; 
+            border: 3px solid #bdc3c7; 
+            max-width: 100%;
+        }
+        /* الـ Canvas هنا سيوضع بدقة فوق الفيديو لنرسم عليه النظارة */
+        canvas { 
+            position: absolute; 
+            top: 0; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            border-radius: 10px;
+        }
+        #status { 
+            margin-top: 20px; 
+            font-size: 20px; 
+            font-weight: bold; 
+            color: #f39c12; 
+        }
+    </style>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <h1>تجربة النظارات الافتراضية 👓</h1>
+    <p>افتح الكاميرا وشاهد كيف تبدو النظارة عليك مباشرة!</p>
+    
+    <button id="start-camera">📸 افتح الكاميرا للتجربة</button>
+
+    <div id="status"></div>
+
+    <div id="camera-container">
+        <video id="video" width="640" height="480" autoplay muted></video>
+    </div>
+
+    <img id="glasses-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Sunglasses_icon.png/640px-Sunglasses_icon.png" style="display:none;" crossorigin="anonymous">
+</div>
+
+<script>
+    const video = document.getElementById('video');
+    const startBtn = document.getElementById('start-camera');
+    const cameraContainer = document.getElementById('camera-container');
+    const statusDiv = document.getElementById('status');
+    const glassesImg = document.getElementById('glasses-img');
+
+    // 1. تحميل نماذج الذكاء الاصطناعي
+    const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+    
+    Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+    ]).then(() => {
+        console.log("تم تحميل النماذج بنجاح");
+        statusDiv.innerHTML = "✅ النظام جاهز. يمكنك فتح الكاميرا الآن.";
+        statusDiv.style.color = "#27ae60";
+    });
+
+    // 2. تشغيل الكاميرا
+    startBtn.addEventListener('click', async () => {
+        cameraContainer.style.display = 'flex';
+        statusDiv.innerHTML = "⏳ جاري فتح الكاميرا...";
+        statusDiv.style.color = "#f39c12";
+        
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+        } catch (err) {
+            statusDiv.innerHTML = "❌ حدث خطأ، يرجى السماح باستخدام الكاميرا.";
+            statusDiv.style.color = "#c0392b";
+        }
+    });
+
+    // 3. التجربة الحية (الرسم المستمر فوق الوجه)
+    video.addEventListener('play', () => {
+        statusDiv.innerHTML = "✨ جرب تحريك رأسك يميناً ويساراً!";
+        statusDiv.style.color = "#2980b9";
+
+        // إنشاء لوحة الرسم (Canvas) ووضعها فوق الفيديو
+        const canvas = faceapi.createCanvasFromMedia(video);
+        cameraContainer.append(canvas);
+        const displaySize = { width: video.width, height: video.height };
+        faceapi.matchDimensions(canvas, displaySize);
+        const ctx = canvas.getContext('2d');
+
+        // دالة يتم استدعاؤها باستمرار مع كل إطار فيديو (Frame)
+        async function detectAndDraw() {
+            // كشف الوجه والمعالم (العيون، الأنف، الخ)
+            const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
+            
+            // تنظيف الرسمة السابقة حتى لا تتراكم الصور
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (detection) {
+                // ملاءمة الأبعاد مع حجم الفيديو المعروض
+                const resizedDetections = faceapi.resizeResults(detection, displaySize);
+                const landmarks = resizedDetections.landmarks;
+
+                // الحصول على نقاط العين اليمنى واليسرى
+                const leftEye = landmarks.getLeftEye();
+                const rightEye = landmarks.getRightEye();
+
+                // حساب نقطة المنتصف لكل عين
+                const leftEyeCenter = {
+                    x: leftEye.reduce((sum, pt) => sum + pt.x, 0) / leftEye.length,
+                    y: leftEye.reduce((sum, pt) => sum + pt.y, 0) / leftEye.length
+                };
+                const rightEyeCenter = {
+                    x: rightEye.reduce((sum, pt) => sum + pt.x, 0) / rightEye.length,
+                    y: rightEye.reduce((sum, pt) => sum + pt.y, 0) / rightEye.length
+                };
+
+                // الرياضيات الممتعة: حساب المسافة والزاوية بين العينين!
+                const deltaX = rightEyeCenter.x - leftEyeCenter.x;
+                const deltaY = rightEyeCenter.y - leftEyeCenter.y;
+                
+                // حساب المسافة لتحديد عرض النظارة (نضربها في 2.5 لتغطي مساحة الوجه بشكل واقعي)
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                const glassesWidth = distance * 2.5; 
+                const glassesHeight = glassesWidth * (glassesImg.height / glassesImg.width); // الحفاظ على النسبة والتناسب
+
+                // حساب زاوية ميلان الرأس
+                const angle = Math.atan2(deltaY, deltaX);
+
+                // نقطة المنتصف بين العينين لوضع النظارة عليها
+                const centerPoint = {
+                    x: leftEyeCenter.x + deltaX / 2,
+                    y: leftEyeCenter.y + deltaY / 2
+                };
+
+                // رسم النظارة باستخدام Canvas API
+                ctx.save(); // حفظ حالة الرسم الحالية
+                ctx.translate(centerPoint.x, centerPoint.y); // نقل نقطة الرسم لمنتصف العينين
+                ctx.rotate(angle); // تدوير الرسمة لتطابق ميلان الرأس
+                // رسم الصورة (مع إزاحتها للأعلى قليلاً لتستقر على الأنف بشكل صحيح)
+                ctx.drawImage(glassesImg, -glassesWidth / 2, -glassesHeight / 2 - (glassesHeight * 0.1), glassesWidth, glassesHeight);
+                ctx.restore(); // استعادة الحالة الأصلية للرسمة التالية
+            }
+
+            // استدعاء الدالة مجدداً بشكل مستمر (Animation Loop)
+            requestAnimationFrame(detectAndDraw);
+        }
+
+        // بدء حلقة الرسم
+        detectAndDraw();
+    });
+</script>
+</body>
+</html>
